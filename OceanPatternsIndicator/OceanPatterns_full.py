@@ -13,6 +13,7 @@ from DM_predict_method import main_predict
 
 import datetime
 from tools import json_builder
+from tools import time_utils
 from dateutil.tz import tzutc
 
 
@@ -67,19 +68,20 @@ def download_data(param):
     }
     """
     # ------------ parameter declaration ------------ #
-    dataset = param['data_source']
+    dataset = param['data_source'][0]   # data_source is a list of str
 
     fields = [param['id_field']]
 
     # ------------ file download ------------ #
     dcs = daccess.Daccess(dataset, fields)
-    time_range = get_time_range(param['start_time'], param['end_time'])
+    time_range_list = time_utils.get_time_range_wd(param['start_time'], param['end_time'])
     daccess_working_domain = dict()
     daccess_working_domain['depth'] = param['working_domain']['depth_layers'][0].copy()
     daccess_working_domain['lonLat'] = param['working_domain']['box'][0].copy()
-    daccess_working_domain['time'] = time_range
-    logging.info(daccess_working_domain)
-    dcs.download(daccess_working_domain)
+    for time_range in time_range_list:
+        daccess_working_domain['time'] = time_range
+        logging.info(daccess_working_domain)
+        dcs.download(daccess_working_domain, rm_file=False)
 
 
 def get_var_name(source, cf_std_name):
@@ -135,7 +137,7 @@ def main():
         err_log = json_builder.LogError(-1, str(e))
         error_exit(err_log, exec_log)
     try:
-        param_dict['var_name'] = get_var_name(param_dict['data_source'], param_dict['id_field'])
+        param_dict['var_name'] = get_var_name(param_dict['data_source'][0], param_dict['id_field'])
         param_dict['file'] = './indir/*.nc'
         if param_dict['id_output_type'] == "BIC":
             logging.info("launching BIC")

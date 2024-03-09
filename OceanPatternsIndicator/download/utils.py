@@ -50,7 +50,7 @@ def init_dl_dir(outdir=None):
     import os
 
     if outdir is None:
-        outdir = os.path.dirname(__file__).split('download')[0] + 'indir'
+        outdir = os.path.dirname(__file__).split('download')[0] + '/indir'
     # create new dir called 'indir' in the parent directory of daccess module
     if not os.path.exists(outdir):
         os.makedirs(outdir)
@@ -62,9 +62,9 @@ def get_gcube_token(globalVariablesFile):
 
     gcubeToken = None
     envs = os.environ
-    if 'GCUBE_TOKEN' in envs:  # when a method is executed in the dataminer
-        gcubeToken = os.environ.get('GCUBE_TOKEN')
-    else:
+
+    if os.path.exists(globalVariablesFile):
+        print(f"Reading gcube_token from {globalVariablesFile}")
         with open(globalVariablesFile) as fp:
             for line in fp:
                 if line.find("gcube_token") != -1:
@@ -72,10 +72,16 @@ def get_gcube_token(globalVariablesFile):
                     gcubeToken = tk.replace('"', '').strip()
                     # print("Found gcube_token")
                     break
-    if gcubeToken is None:
-        raise Exception('Error gcube_token not found!')
+    elif 'GCUBE_TOKEN' in envs:  # when a method is executed in the dataminer
+        print(f"Reading gcube_token from 'GCUBE_TOKEN' variables")
+        gcubeToken = os.environ.get('GCUBE_TOKEN')
     else:
-        return gcubeToken
+        raise Exception('Error gcube_token not found!')
+
+    if gcubeToken is None:
+        raise Exception("Some error occurs when try to read gcube_token!")
+
+    return gcubeToken
 
 
 def show_dl_percentage(dl, start, total_length):

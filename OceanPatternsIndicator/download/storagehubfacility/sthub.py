@@ -2,7 +2,7 @@ import sys
 import time
 
 from download.storagehubfacility import storagehubfacility as sthubf, check_json
-from download.strategy import DownloadStrategy
+from download.interface.idownload import DownloadStrategy
 from download.storagehubfacility import dataset_access as db
 import json
 from download import utils
@@ -51,25 +51,41 @@ def rm(filename):
         os.remove(filename)
 
 
-def download_from_sthub(file_to_download, output_file, in_memory, max_attempt, dl_status):
-    import netCDF4
+def download_from_sthub(file_to_download, output_file, in_memory, max_attempt, dl_status, return_type):
     item_id = file_to_download[0]
     item_size = file_to_download[2]
-    myshfo = sthubf.StorageHubFacility(operation="Download", ItemId=item_id,
-                                       localFile=output_file, itemSize=item_size)
+    myshfo = sthubf.StorageHubFacility(operation="Download", ItemId=item_id, localFile=output_file, itemSize=item_size)
+
     attempt = 0
     file_is_downloaded = False
     while attempt < max_attempt and not file_is_downloaded:
         try:
-            nc_file = myshfo.main(in_memory=in_memory, dl_status=dl_status)
-            if not in_memory:  # myshfo.main only download output_file on disk and doesn't return anything
-                nc_file = netCDF4.Dataset(output_file, mode='r')
+            # in_memory false as default -> the file is written on disk as output_file
+            nc_file = myshfo.main(in_memory=in_memory, dl_status=dl_status)     # return None if in_memory == False
+            if not in_memory:  # need to load manually the file if in_memory is False
+                nc_file = load_file_from_filesystem(output_file, return_type)
             file_is_downloaded = True
         except Exception as e:
             import sys
             print(e, file=sys.stderr)
             attempt += 1
             handle_network_error(output_file, attempt, max_attempt)
+
+    return nc_file
+
+
+def load_file_from_filesystem(output_file, return_type):
+    import netCDF4
+
+    if not os.path.exists(output_file):
+        raise Exception("ERROR Can't load {}: it doesn't exists on filesystem".format(output_file))
+
+    if return_type == "netCDF4":  # if downloaded previously and rm_file == False
+        nc_file = netCDF4.Dataset(output_file, mode='r')
+    elif return_type == "str":
+        nc_file = output_file
+    else:
+        raise Exception("Return type '{}' unknown".format(return_type))
     return nc_file
 
 
@@ -128,16 +144,16 @@ class StHub(DownloadStrategy):
                             .format(dataset, ','.join(field_list)))
         return file_type_list
 
-    def get_file_from_sthub_workspace(self, file_to_download, in_memory, rm_file, max_attempt, dl_status=False):
-        import netCDF4
-
-        output_file = self.get_output_file(file_to_download)
-        if os.path.exists(output_file):  # if downloaded previously and rm_file == False
-            nc_file = netCDF4.Dataset(output_file, mode='r')
+    def get_file_from_sthub_workspace(self, file_to_download, in_memory, rm_file, max_attempt, return_type,
+                                      dl_status=False):
+        output_file = self.get_output_file(file_to_download)    # path of output file on disk
+        if os.path.exists(output_file):
+            nc_file = load_file_from_filesystem(output_file, return_type)
         else:
-            nc_file = download_from_sthub(file_to_download, output_file, in_memory, max_attempt, dl_status)
+            nc_file = download_from_sthub(file_to_download, output_file, in_memory, max_attempt, dl_status, return_type)
+
         if rm_file:
-            rm(output_file)
+            rm(output_file)     # remove the file on disk, keep it only in memory
         return nc_file
 
     def get_output_file(self, file_to_download):
@@ -145,7 +161,8 @@ class StHub(DownloadStrategy):
         output_file = self.outdir + "/" + filename
         return output_file
 
-    def download(self, dataset, working_domain, fields, in_memory=False, rm_file=True, max_attempt=5):
+    def download(self, dataset, working_domain, fields, in_memory=False, rm_file=True, max_attempt=5,
+                 return_type="netCDF4"):
         """
         @param in_memory: if True the function return a netCDF4.Dataset in memory
         @param rm_file: if True the downloaded files will be deleted once they are loaded into memory
@@ -160,7 +177,7 @@ class StHub(DownloadStrategy):
         nc_files = list()
         file_to_download_list = self.find_files_to_download(dataset, fields, working_domain)
         for file_to_download in file_to_download_list:
-            nc_file = self.get_file_from_sthub_workspace(file_to_download, in_memory, rm_file, max_attempt)
+            nc_file = self.get_file_from_sthub_workspace(file_to_download, in_memory, rm_file, max_attempt, return_type)
             nc_files.append(nc_file)
 
         return nc_files
@@ -183,8 +200,15 @@ def filter_dataset(file_list, working_domain, file_types):
         for file_type in file_types:
             if file_type in file[1]:
                 for t in time:
-                    if t + '01_m' in file[1] or t + '.nc' in file[1]:  # med or glo
-                        filtered_list.append(file)
-                        break
+                    if t + '01_m' in file[1]:   # med pattern: YYYYMM01_m*
+                        if file not in filtered_list:
+                            filtered_list.append(file)
+                    elif t + '.nc' in file[1]:  # glo pattern: *_YYYYMM.nc
+                        if file not in filtered_list:
+                            filtered_list.append(file)
+                    elif t in file[1]:
+                        if file not in filtered_list:   # wind dataset pattern: *YYYYMM_YYYYMM.nc
+                            filtered_list.append(file)
+                    break
 
     return filtered_list

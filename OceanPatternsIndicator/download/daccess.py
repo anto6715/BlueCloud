@@ -1,9 +1,70 @@
-from download.context import DownloadContext, InputContext
 import os
 import json
+import sys
+
+from download.contexts.input_ctx import InputContext
+from download.contexts.download_ctx import DownloadContext
+from download.wekeo import in_hda, hda
+from download.storagehubfacility import in_sthub, sthub
 
 workingDomain_attrs = ['lonLat', 'time']
 workingDomain_attrs_optional = ['depth']
+
+
+def get_infrastructure(dataset):
+    actual_dir = os.path.dirname(__file__)
+    with open(actual_dir + '/config/dataset_infrastructures.json') as json_file:
+        dataset_infrastructures = json.load(json_file)
+    if dataset in dataset_infrastructures:
+        infrastructure = dataset_infrastructures[dataset]['infrastructure']
+    else:
+        raise Exception("Can't find dataset: " + dataset + ' in catalogue')
+
+    return infrastructure
+
+
+class Daccess:
+    def __init__(self, dataset: str, fields: list, output_dir=None, hda_key="", time_freq="m"):
+        """
+        @param dataset: source dataset
+        @param fields: cf standard name used to represent a variable
+        @param output_dir: output directory
+        @param hda_key: key to access to hda service, leave "" if you want to use bluecloud proxy
+        @param return_type: if netCDF4 return a netCDF4.Dataset, if str return the output filename
+        """
+        self.fields = fields
+        self.outDir = output_dir
+        self.hdaKey = hda_key
+
+        # select the right strategy in according to the selected dataset
+        self.dataset = dataset
+        self._infrastructure = get_infrastructure(dataset)
+
+        # select the right input/download interface
+        if self._infrastructure == 'WEKEO':
+            print("Downloading from MEDSEA_MULTIYEAR_PHY_006_004")
+            self.input_ctx = InputContext(in_hda.InHDA())
+            self.download_ctx = DownloadContext(hda.HDA(self.hdaKey, self.outDir))
+        elif self._infrastructure == 'STHUB':
+            print("Downloading from Storage Hub Facility")
+            self.input_ctx = InputContext(in_sthub.InStHub(time_freq=time_freq))
+            self.download_ctx = DownloadContext(sthub.StHub(self.dataset, self.outDir))
+        else:
+            raise Exception('Infrastructure: ' + self._infrastructure + ' not supported')
+
+    def download(self, daccess_working_domain: dict, **kwargs):
+        """
+        @param daccess_working_domain: dict with spatial/time information:
+                lonLat: list of list, the internal list has the format:  [minLon , maxLon, minLat , maxLat]
+                depth: depth range in string format: [minDepth, maxDepth]
+                time: list of two strings that represent a time range: [YYYY-MM-DDThh:mm:ssZ, YYYY-MM-DDThh:mm:ssZ]
+        @return: store netCDF file in download directory
+            """
+
+        wd_validation(daccess_working_domain)
+        # fix the working_domain format in according to the selected download strategy
+        working_domain = self.input_ctx.get_wd(daccess_working_domain, self.dataset)
+        return self.download_ctx.download(self.dataset, working_domain, self.fields, **kwargs)
 
 
 def wd_validation(workingDomain):
@@ -39,8 +100,8 @@ def wd_validation(workingDomain):
 
     # time check
     time = workingDomain['time']
-    if len(time) != 2:
-        raise Exception("Wrong size for lonLat, please check it: " + str(time))
+    # if len(time) != 2:
+    #     raise Exception("Wrong size for lonLat, please check it: " + str(time))
 
 
 def float_int_check(elements):
@@ -50,56 +111,3 @@ def float_int_check(elements):
             print("ERROR lonLat value must be float or int, please check it: ", elements)
             return False
     return True
-
-
-class Daccess:
-    def __init__(self, dataset: str, fields: list, outDir=None, hdaKey=""):
-        """
-        @param dataset: source dataset
-        @param fields: cf standard name used to represent a variable
-        @param outDir: output directory
-        @param hdaKey: key to access to hda service, leave "" if you want to use bluecloud proxy
-        """
-        self.fields = fields
-        self.outDir = outDir
-        self.hdaKey = hdaKey
-
-        # select the right strategy in according to the selected dataset
-        self.dataset = dataset
-
-        actual_dir = os.path.dirname(__file__)
-        with open(actual_dir + '/config/dataset_infrastructures.json') as json_file:
-            self._dataset_infrastructures = json.load(json_file)
-
-        if dataset in self._dataset_infrastructures:
-            self._infrastructure = self._dataset_infrastructures[dataset]['infrastructure']
-        else:
-            raise Exception("Can't find dataset: " + dataset + ' in catalogue')
-
-        # select the right input/download strategies
-        if self._infrastructure == 'WEKEO':
-            from download.wekeo import in_hda, hda
-            print("Downloading from MEDSEA_MULTIYEAR_PHY_006_004")
-            self.icontext = InputContext(in_hda.InHDA())
-            self.dcontext = DownloadContext(hda.HDA(self.hdaKey, self.outDir))
-        elif self._infrastructure == 'STHUB':
-            from download.storagehubfacility import in_sthub, sthub
-            print("Downloading from Storage Hub Facility")
-            self.icontext = InputContext(in_sthub.InStHub())
-            self.dcontext = DownloadContext(sthub.StHub(self.dataset, self.outDir))
-        else:
-            raise Exception('Infrastructure: ' + self._infrastructure + ' not supported')
-
-    def download(self, daccess_working_domain: dict):
-        """
-        @param daccess_working_domain: dict with spatial/time information:
-                lonLat: list of list, the internal list has the format:  [minLon , maxLon, minLat , maxLat]
-                depth: depth range in string format: [minDepth, maxDepth]
-                time: list of two strings that represent a time range: [YYYY-MM-DDThh:mm:ssZ, YYYY-MM-DDThh:mm:ssZ]
-        @return: store netCDF file in download directory
-            """
-
-        wd_validation(daccess_working_domain)
-        # fix the working_domain format in according to the selected download strategy
-        working_domain = self.icontext.get_wd(daccess_working_domain, self.dataset)
-        return self.dcontext.download(self.dataset, working_domain, self.fields)

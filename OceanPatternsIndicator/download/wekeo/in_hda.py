@@ -1,4 +1,4 @@
-from download.strategy import InputStrategy
+from download.interface.iinput import InputStrategy
 from download.wekeo import dataset_access as db
 import copy
 

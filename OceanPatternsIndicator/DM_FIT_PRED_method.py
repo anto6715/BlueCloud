@@ -1,5 +1,6 @@
 import logging
 import time
+import numpy as np
 from utils.data_loader_utils import load_data
 from utils.model_train_utils import train_model
 from utils.prediction_utils import predict, robustness, quantiles, generate_plots
@@ -21,7 +22,7 @@ def get_args():
     parse.add_argument('file_name', type=str, help='input dataset')
     parse.add_argument('var_name_ds', type=str, help='name of variable in dataset')
     parse.add_argument('var_name_mdl', type=str, help='name of variable in model')
-
+    parse.add_argument('working_domain', type=dict, help='working domain')    
     return parse.parse_args()
 
 
@@ -35,7 +36,7 @@ def main_fit_predict(args):
         k: int, number of class
         var_name: string, name var in dataset
         id_field: string, standard name of var
-    """
+    """        
     var_name_ds = args['var_name']
     var_name_mdl = args['id_field']
     features_in_ds = {var_name_mdl: var_name_ds}
@@ -50,6 +51,9 @@ def main_fit_predict(args):
     logging.info("loading the dataset")
     start_time = time.time()
     ds, first_date, coord_dict = load_data(file_name=file_name, var_name_ds=var_name_ds)
+    zmax = int(args['working_domain']['depth_layers'][0][1])
+    ds = ds.where(np.abs(ds.depth)<zmax,drop=True)
+
     z_dim = coord_dict['depth']
     load_time = time.time() - start_time
     logging.info("load finished in " + str(load_time) + "sec")
